@@ -124,7 +124,7 @@ pub(crate) fn track_skill_invocations(
     tracking: Option<TrackEventsContext>,
     invocations: Vec<SkillInvocation>,
 ) {
-    if config.analytics_enabled == Some(false) {
+    if config.analytics_enabled != Some(true) {
         return;
     }
     let Some(tracking) = tracking else {

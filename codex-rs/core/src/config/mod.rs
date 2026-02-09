@@ -1813,7 +1813,7 @@ impl Config {
                     environment,
                     exporter,
                     trace_exporter,
-                    metrics_exporter: OtelExporterKind::Statsig,
+                    metrics_exporter: OtelExporterKind::None,
                 }
             },
         };
@@ -3949,6 +3949,7 @@ model_verbosity = "high"
             stream_idle_timeout_ms: Some(300_000),
             requires_openai_auth: false,
             supports_websockets: false,
+            oauth: None,
         };
         let model_provider_map = {
             let mut model_provider_map = built_in_model_providers();

@@ -457,6 +457,15 @@
           "description": "Friendly display name.",
           "type": "string"
         },
+        "oauth": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/OAuthConfig"
+            }
+          ],
+          "default": null,
+          "description": "Optional OAuth token refresh configuration. When present, the manager automatically refreshes the `api-token` header on a background timer."
+        },
         "query_params": {
           "additionalProperties": {
             "type": "string"
@@ -561,6 +570,44 @@
           "type": "array"
         }
       ]
+    },
+    "OAuthConfig": {
+      "description": "OAuth token refresh configuration for a model provider.\n\nWhen present on a `ModelProviderInfo`, Codex will automatically refresh the `api-token` header on a background timer using the specified refresh endpoint.",
+      "properties": {
+        "api_version": {
+          "description": "Value for the `api-version` header sent on both refresh and API requests.",
+          "type": "string"
+        },
+        "initial_api_token_env": {
+          "description": "Environment variable name that holds the initial `api-token` value (used for the very first refresh call). If absent, the first refresh sends an empty string.",
+          "type": "string"
+        },
+        "initial_refresh_token_env": {
+          "description": "Environment variable name that holds the initial refresh token (used for the very first refresh call).",
+          "type": "string"
+        },
+        "refresh_interval_secs": {
+          "description": "Fallback refresh interval in seconds. Used when the server does not return a usable `expiresIn` value. Defaults to 1500 (25 minutes).",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "refresh_path": {
+          "description": "Path to the refresh endpoint, relative to the provider's `base_url`. Example: `\"tokens/refresh\"`",
+          "type": "string"
+        },
+        "subscription_key_env": {
+          "description": "Environment variable name that holds the `subscription-key` header value.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "api_version",
+        "initial_refresh_token_env",
+        "refresh_path",
+        "subscription_key_env"
+      ],
+      "type": "object"
     },
     "OAuthCredentialsStoreMode": {
       "description": "Determine where Codex should store and read MCP credentials.",

@@ -100,6 +100,7 @@ use crate::error::Result;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
+use crate::oauth::OAuthTokenManager;
 use crate::tools::spec::create_tools_json_for_responses_api;
 
 pub const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
@@ -134,6 +135,10 @@ struct ModelClientState {
     disable_websockets: AtomicBool,
 
     preconnect: Mutex<Option<PreconnectTask>>,
+
+    /// OAuth token manager for providers that require token refresh.
+    /// Lazily initialized on first `current_client_setup()` call.
+    oauth_manager: tokio::sync::OnceCell<Option<Arc<OAuthTokenManager>>>,
 }
 
 impl std::fmt::Debug for ModelClientState {
@@ -159,6 +164,7 @@ impl std::fmt::Debug for ModelClientState {
                 &self.disable_websockets.load(Ordering::Relaxed),
             )
             .field("preconnect", &"<opaque>")
+            .field("oauth_manager", &"<opaque>")
             .finish()
     }
 }
@@ -262,6 +268,7 @@ impl ModelClient {
                 beta_features_header,
                 disable_websockets: AtomicBool::new(false),
                 preconnect: Mutex::new(None),
+                oauth_manager: tokio::sync::OnceCell::new(),
             }),
         }
     }
@@ -473,6 +480,36 @@ impl ModelClient {
         self.state.disable_websockets.load(Ordering::Relaxed)
     }
 
+    /// Returns the OAuth token manager, creating it on first call if the
+    /// provider has an `[oauth]` config section.
+    async fn oauth_manager(&self) -> Option<&OAuthTokenManager> {
+        let manager = self
+            .state
+            .oauth_manager
+            .get_or_init(|| async {
+                match &self.state.provider.oauth {
+                    Some(oauth_config) => {
+                        let base_url = self
+                            .state
+                            .provider
+                            .base_url
+                            .as_deref()
+                            .unwrap_or("https://api.openai.com/v1");
+                        match OAuthTokenManager::new(oauth_config, base_url).await {
+                            Ok(m) => Some(Arc::new(m)),
+                            Err(e) => {
+                                tracing::error!("Failed to initialize OAuth token manager: {e}");
+                                None
+                            }
+                        }
+                    }
+                    None => None,
+                }
+            })
+            .await;
+        manager.as_ref().map(Arc::as_ref)
+    }
+
     /// Returns auth + provider configuration resolved from the current session auth state.
     ///
     /// This centralizes setup used by both preconnect and normal request paths so they stay in
@@ -482,10 +519,19 @@ impl ModelClient {
             Some(manager) => manager.auth().await,
             None => None,
         };
-        let api_provider = self
+        let mut api_provider = self
             .state
             .provider
             .to_api_provider(auth.as_ref().map(CodexAuth::auth_mode))?;
+
+        // Inject dynamic api-token header if OAuth is configured.
+        if let Some(oauth_mgr) = self.oauth_manager().await {
+            let token = oauth_mgr.current_api_token();
+            if let Ok(value) = HeaderValue::from_str(&token) {
+                api_provider.headers.insert("api-token", value);
+            }
+        }
+
         let api_auth = auth_provider_from_auth(auth.clone(), &self.state.provider)?;
         Ok(CurrentClientSetup {
             auth,

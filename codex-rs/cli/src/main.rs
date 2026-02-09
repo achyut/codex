@@ -314,24 +314,6 @@ struct AppServerCommand {
         default_value = codex_app_server::AppServerTransport::DEFAULT_LISTEN_URL
     )]
     listen: codex_app_server::AppServerTransport,
-
-    /// Controls whether analytics are enabled by default.
-    ///
-    /// Analytics are disabled by default for app-server. Users have to explicitly opt in
-    /// via the `analytics` section in the config.toml file.
-    ///
-    /// However, for first-party use cases like the VSCode IDE extension, we default analytics
-    /// to be enabled by default by setting this flag. Users can still opt out by setting this
-    /// in their config.toml:
-    ///
-    /// ```toml
-    /// [analytics]
-    /// enabled = false
-    /// ```
-    ///
-    /// See https://developers.openai.com/codex/config-advanced/#metrics for more details.
-    #[arg(long = "analytics-default-enabled")]
-    analytics_default_enabled: bool,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -601,7 +583,6 @@ async fn cli_main(codex_linux_sandbox_exe: Option<PathBuf>) -> anyhow::Result<()
                     codex_linux_sandbox_exe,
                     root_config_overrides,
                     codex_core::config_loader::LoaderOverrides::default(),
-                    app_server_cli.analytics_default_enabled,
                     transport,
                 )
                 .await?;
@@ -1336,20 +1317,12 @@ mod tests {
     }
 
     #[test]
-    fn app_server_analytics_default_disabled_without_flag() {
+    fn app_server_default_transport_is_stdio() {
         let app_server = app_server_from_args(["codex", "app-server"].as_ref());
-        assert!(!app_server.analytics_default_enabled);
         assert_eq!(
             app_server.listen,
             codex_app_server::AppServerTransport::Stdio
         );
-    }
-
-    #[test]
-    fn app_server_analytics_default_enabled_with_flag() {
-        let app_server =
-            app_server_from_args(["codex", "app-server", "--analytics-default-enabled"].as_ref());
-        assert!(app_server.analytics_default_enabled);
     }
 
     #[test]

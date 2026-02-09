@@ -7,6 +7,7 @@
 
 use crate::auth::AuthMode;
 use crate::error::EnvVarError;
+use crate::oauth::OAuthConfig;
 use codex_api::Provider as ApiProvider;
 use codex_api::provider::RetryConfig as ApiRetryConfig;
 use http::HeaderMap;
@@ -112,6 +113,11 @@ pub struct ModelProviderInfo {
     /// Whether this provider supports the Responses API WebSocket transport.
     #[serde(default)]
     pub supports_websockets: bool,
+
+    /// Optional OAuth token refresh configuration. When present, the manager
+    /// automatically refreshes the `api-token` header on a background timer.
+    #[serde(default)]
+    pub oauth: Option<OAuthConfig>,
 }
 
 impl ModelProviderInfo {
@@ -257,6 +263,7 @@ impl ModelProviderInfo {
             stream_idle_timeout_ms: None,
             requires_openai_auth: true,
             supports_websockets: true,
+            oauth: None,
         }
     }
 
@@ -331,6 +338,7 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         stream_idle_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        oauth: None,
     }
 }
 
@@ -360,6 +368,7 @@ base_url = "http://localhost:11434/v1"
             stream_idle_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            oauth: None,
         };
 
         let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -391,6 +400,7 @@ query_params = { api-version = "2025-04-01-preview" }
             stream_idle_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            oauth: None,
         };
 
         let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
@@ -425,6 +435,7 @@ env_http_headers = { "X-Example-Env-Header" = "EXAMPLE_ENV_VAR" }
             stream_idle_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            oauth: None,
         };
 
         let provider: ModelProviderInfo = toml::from_str(azure_provider_toml).unwrap();
