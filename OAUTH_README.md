@@ -57,41 +57,40 @@ proxy.
 ### 1. Set Environment Variables
 
 ```bash
-export SUBSCRIPTION_KEY="your-medtronic-subscription-key"
-export INITIAL_REFRESH_TOKEN="your-initial-refresh-token"
-export INITIAL_API_TOKEN="your-initial-api-token"
+export MEDTRONIC_GPT_SUBSCRIPTION_KEY="your-medtronic-subscription-key"
+export MEDTRONIC_GPT_REFRESH_TOKEN="your-initial-refresh-token"
+export MEDTRONIC_GPT_API_TOKEN="your-initial-api-token"
 ```
 
-- `SUBSCRIPTION_KEY`: Your Medtronic API subscription key (static, does not
+- `MEDTRONIC_GPT_SUBSCRIPTION_KEY`: Your Medtronic API subscription key (static, does not
   change).
-- `INITIAL_REFRESH_TOKEN`: A valid refresh token to bootstrap the first token
+- `MEDTRONIC_GPT_REFRESH_TOKEN`: A valid refresh token to bootstrap the first token
   exchange. After the first refresh, the manager uses the new refresh token
   returned by the server.
-- `INITIAL_API_TOKEN`: A valid (or recently expired) api-token for the first
+- `MEDTRONIC_GPT_API_TOKEN`: A valid (or recently expired) api-token for the first
   refresh call. After that, the manager uses the refreshed token.
 
 ### 2. Configure `~/.codex/config.toml`
 
 ```toml
-model = "your-model-name"
+model = "gpt-5"
 model_provider = "medtronic"
 
 [model_providers.medtronic]
 name = "Medtronic Proxy"
-base_url = "https://your-medtronic-proxy-url.com"
+base_url = "https://api.gpt-dev.medtronic.com/providers/openai/v1"
 wire_api = "responses"
 requires_openai_auth = false
 
-# Static headers sent on every Responses API request
-http_headers = { "subscription-key" = "your-sub-key-value", "api-version" = "3.0" }
-
 # OAuth token refresh configuration
+# The subscription-key and api-version headers are injected automatically
+# from the oauth config below -- no need for http_headers.
 [model_providers.medtronic.oauth]
-refresh_path = "tokens/refresh"
+refresh_path = "https://api.gpt-dev.medtronic.com/tokens/refresh"
 api_version = "3.0"
-subscription_key_env = "SUBSCRIPTION_KEY"
-initial_refresh_token_env = "INITIAL_REFRESH_TOKEN"
-initial_api_token_env = "INITIAL_API_TOKEN"
+subscription_key_env = "MEDTRONIC_GPT_SUBSCRIPTION_KEY"
+initial_refresh_token_env = "MEDTRONIC_GPT_REFRESH_TOKEN"
+initial_api_token_env = "MEDTRONIC_GPT_API_TOKEN"
 
 # Optional: override the fallback refresh interval (seconds).
 # Only used if the server doesn't return a usable expiresIn value.
@@ -116,12 +115,12 @@ Codex will:
 
 ### "Required environment variable ... is not set"
 
-Make sure `SUBSCRIPTION_KEY`, `INITIAL_REFRESH_TOKEN`, and `INITIAL_API_TOKEN`
+Make sure `MEDTRONIC_GPT_SUBSCRIPTION_KEY`, `MEDTRONIC_GPT_REFRESH_TOKEN`, and `MEDTRONIC_GPT_API_TOKEN`
 are exported in your shell before running Codex.
 
 ### "Token refresh failed with HTTP 401"
 
-Your `INITIAL_REFRESH_TOKEN` or `INITIAL_API_TOKEN` may have expired. Obtain
+Your `MEDTRONIC_GPT_REFRESH_TOKEN` or `MEDTRONIC_GPT_API_TOKEN` may have expired. Obtain
 fresh values from your Medtronic portal and re-export them.
 
 ### "Failed to initialize OAuth token manager"

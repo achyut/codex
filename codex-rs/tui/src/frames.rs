@@ -44,6 +44,7 @@ macro_rules! frames_for {
     };
 }
 
+pub(crate) const FRAMES_MEDTRONIC: [&str; 36] = frames_for!("medtronic");
 pub(crate) const FRAMES_DEFAULT: [&str; 36] = frames_for!("default");
 pub(crate) const FRAMES_CODEX: [&str; 36] = frames_for!("codex");
 pub(crate) const FRAMES_OPENAI: [&str; 36] = frames_for!("openai");
@@ -56,6 +57,7 @@ pub(crate) const FRAMES_SHAPES: [&str; 36] = frames_for!("shapes");
 pub(crate) const FRAMES_SLUG: [&str; 36] = frames_for!("slug");
 
 pub(crate) const ALL_VARIANTS: &[&[&str]] = &[
+    &FRAMES_MEDTRONIC,
     &FRAMES_DEFAULT,
     &FRAMES_CODEX,
     &FRAMES_OPENAI,

@@ -524,11 +524,20 @@ impl ModelClient {
             .provider
             .to_api_provider(auth.as_ref().map(CodexAuth::auth_mode))?;
 
-        // Inject dynamic api-token header if OAuth is configured.
+        // Inject OAuth headers if configured: api-token (dynamic),
+        // subscription-key and api-version (static, from env/config).
         if let Some(oauth_mgr) = self.oauth_manager().await {
-            let token = oauth_mgr.current_api_token();
-            if let Ok(value) = HeaderValue::from_str(&token) {
+            let api_token = oauth_mgr.current_api_token();
+            let sub_key = oauth_mgr.subscription_key();
+            let api_ver = oauth_mgr.api_version();
+            if let Ok(value) = HeaderValue::from_str(&api_token) {
                 api_provider.headers.insert("api-token", value);
+            }
+            if let Ok(value) = HeaderValue::from_str(sub_key) {
+                api_provider.headers.insert("subscription-key", value);
+            }
+            if let Ok(value) = HeaderValue::from_str(api_ver) {
+                api_provider.headers.insert("api-version", value);
             }
         }
 

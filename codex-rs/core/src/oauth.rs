@@ -102,6 +102,10 @@ struct OAuthTokenState {
 /// token before it expires.
 pub struct OAuthTokenManager {
     state: Arc<RwLock<OAuthTokenState>>,
+    /// Static subscription key, read once from the environment at init time.
+    subscription_key: String,
+    /// Static api-version value from config, used on every request.
+    api_version: String,
     /// Handle to the background refresh task so we can abort it on drop.
     _refresh_handle: tokio::task::JoinHandle<()>,
 }
@@ -165,6 +169,8 @@ impl OAuthTokenManager {
 
         Ok(Self {
             state,
+            subscription_key,
+            api_version,
             _refresh_handle: refresh_handle,
         })
     }
@@ -184,6 +190,16 @@ impl OAuthTokenManager {
             }
         }
     }
+
+    /// Returns the static `subscription-key` value.
+    pub fn subscription_key(&self) -> &str {
+        &self.subscription_key
+    }
+
+    /// Returns the static `api-version` value.
+    pub fn api_version(&self) -> &str {
+        &self.api_version
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +207,10 @@ impl OAuthTokenManager {
 // ---------------------------------------------------------------------------
 
 fn build_refresh_url(base_url: &str, refresh_path: &str) -> String {
+    // If refresh_path is already an absolute URL, use it as-is.
+    if refresh_path.starts_with("http://") || refresh_path.starts_with("https://") {
+        return refresh_path.to_string();
+    }
     let base = base_url.trim_end_matches('/');
     let path = refresh_path.trim_start_matches('/');
     format!("{base}/{path}")
@@ -222,10 +242,12 @@ async fn refresh_once(
 ) -> anyhow::Result<OAuthTokenState> {
     let resp = client
         .post(refresh_url)
+        .header("accept", "application/json")
         .header("subscription-key", subscription_key)
         .header("api-version", api_version)
         .header("api-token", current_api_token)
         .header("refresh-token", current_refresh_token)
+        .header("content-length", "0")
         .send()
         .await?;
 
@@ -329,6 +351,14 @@ mod tests {
             build_refresh_url("https://proxy.example.com/v1/", "/tokens/refresh"),
             "https://proxy.example.com/v1/tokens/refresh"
         );
+        // Absolute URL is used as-is.
+        assert_eq!(
+            build_refresh_url(
+                "https://proxy.example.com/v1",
+                "https://proxy.example.com/tokens/refresh"
+            ),
+            "https://proxy.example.com/tokens/refresh"
+        );
     }
 
     #[test]
@@ -358,19 +388,25 @@ mod tests {
 refresh_path = "tokens/refresh"
 refresh_interval_secs = 1500
 api_version = "3.0"
-subscription_key_env = "SUBSCRIPTION_KEY"
-initial_refresh_token_env = "INITIAL_REFRESH_TOKEN"
-initial_api_token_env = "INITIAL_API_TOKEN"
+subscription_key_env = "MEDTRONIC_GPT_SUBSCRIPTION_KEY"
+initial_refresh_token_env = "MEDTRONIC_GPT_REFRESH_TOKEN"
+initial_api_token_env = "MEDTRONIC_GPT_API_TOKEN"
         "#;
         let config: OAuthConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.refresh_path, "tokens/refresh");
         assert_eq!(config.refresh_interval_secs, Some(1500));
         assert_eq!(config.api_version, "3.0");
-        assert_eq!(config.subscription_key_env, "SUBSCRIPTION_KEY");
-        assert_eq!(config.initial_refresh_token_env, "INITIAL_REFRESH_TOKEN");
+        assert_eq!(
+            config.subscription_key_env,
+            "MEDTRONIC_GPT_SUBSCRIPTION_KEY"
+        );
+        assert_eq!(
+            config.initial_refresh_token_env,
+            "MEDTRONIC_GPT_REFRESH_TOKEN"
+        );
         assert_eq!(
             config.initial_api_token_env,
-            Some("INITIAL_API_TOKEN".to_string())
+            Some("MEDTRONIC_GPT_API_TOKEN".to_string())
         );
     }
 
@@ -379,8 +415,8 @@ initial_api_token_env = "INITIAL_API_TOKEN"
         let toml_str = r#"
 refresh_path = "tokens/refresh"
 api_version = "3.0"
-subscription_key_env = "SUB_KEY"
-initial_refresh_token_env = "REFRESH_TOK"
+subscription_key_env = "MEDTRONIC_GPT_SUBSCRIPTION_KEY"
+initial_refresh_token_env = "MEDTRONIC_GPT_REFRESH_TOKEN"
         "#;
         let config: OAuthConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.refresh_interval_secs, None);
