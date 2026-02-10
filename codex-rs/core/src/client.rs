@@ -673,7 +673,12 @@ impl ModelClientSession {
             None
         };
 
-        let include = if reasoning.is_some() {
+        // Don't request encrypted reasoning content when the provider uses
+        // OAuth token refresh — the encrypted payload is tied to a specific
+        // server-side session key that changes on every token rotation, so
+        // sending stale encrypted content back triggers
+        // `invalid_encrypted_content` errors.
+        let include = if reasoning.is_some() && self.client.state.provider.oauth.is_none() {
             vec!["reasoning.encrypted_content".to_string()]
         } else {
             Vec::new()
@@ -930,11 +935,15 @@ impl ModelClientSession {
         }
 
         let auth_manager = self.client.state.auth_manager.clone();
-        let api_prompt = Self::build_responses_request(prompt)?;
+        let mut api_prompt = Self::build_responses_request(prompt)?;
+        if self.client.state.provider.oauth.is_some() {
+            strip_encrypted_content_from_input(&mut api_prompt.input);
+        }
 
         let mut auth_recovery = auth_manager
             .as_ref()
             .map(super::auth::AuthManager::unauthorized_recovery);
+        let mut oauth_retried = false;
         loop {
             let client_setup = self.client.current_client_setup().await?;
             let transport = ReqwestTransport::new(build_reqwest_client());
@@ -957,21 +966,44 @@ impl ModelClientSession {
                 compression,
             );
 
+            tracing::debug!(
+                model = %model_info.slug,
+                input_items = api_prompt.input.len(),
+                has_oauth = self.client.state.provider.oauth.is_some(),
+                "HTTP: sending Responses API request"
+            );
+
             let stream_result = client
                 .stream_prompt(&model_info.slug, &api_prompt, options)
                 .await;
 
             match stream_result {
                 Ok(stream) => {
+                    tracing::debug!("HTTP: Responses API request succeeded, streaming response");
                     return Ok(map_response_stream(stream, otel_manager.clone()));
                 }
                 Err(ApiError::Transport(
                     unauthorized_transport @ TransportError::Http { status, .. },
                 )) if status == StatusCode::UNAUTHORIZED => {
+                    tracing::warn!("HTTP: received 401 Unauthorized from API");
+                    // For OAuth providers: force-refresh the token and retry once.
+                    // We ignore the refresh result because the background loop may
+                    // have already placed a valid token in shared state.
+                    if !oauth_retried
+                        && let Some(oauth_mgr) = self.client.oauth_manager().await
+                    {
+                        warn!("401 Unauthorized — forcing OAuth token refresh and retrying");
+                        let _ = oauth_mgr.force_refresh().await;
+                        oauth_retried = true;
+                        continue;
+                    }
                     handle_unauthorized(unauthorized_transport, &mut auth_recovery).await?;
                     continue;
                 }
-                Err(err) => return Err(map_api_error(err)),
+                Err(err) => {
+                    tracing::warn!("HTTP: Responses API request failed: {err}");
+                    return Err(map_api_error(err));
+                }
             }
         }
     }
@@ -988,11 +1020,15 @@ impl ModelClientSession {
         turn_metadata_header: Option<&str>,
     ) -> Result<WebsocketStreamOutcome> {
         let auth_manager = self.client.state.auth_manager.clone();
-        let api_prompt = Self::build_responses_request(prompt)?;
+        let mut api_prompt = Self::build_responses_request(prompt)?;
+        if self.client.state.provider.oauth.is_some() {
+            strip_encrypted_content_from_input(&mut api_prompt.input);
+        }
 
         let mut auth_recovery = auth_manager
             .as_ref()
             .map(super::auth::AuthManager::unauthorized_recovery);
+        let mut oauth_retried = false;
         loop {
             let client_setup = self.client.current_client_setup().await?;
             let compression = self.responses_request_compression(client_setup.auth.as_ref());
@@ -1025,6 +1061,15 @@ impl ModelClientSession {
                 Err(ApiError::Transport(
                     unauthorized_transport @ TransportError::Http { status, .. },
                 )) if status == StatusCode::UNAUTHORIZED => {
+                    // For OAuth providers: force-refresh the token and retry once.
+                    if !oauth_retried
+                        && let Some(oauth_mgr) = self.client.oauth_manager().await
+                    {
+                        warn!("401 Unauthorized on WebSocket — forcing OAuth token refresh and retrying");
+                        let _ = oauth_mgr.force_refresh().await;
+                        oauth_retried = true;
+                        continue;
+                    }
                     handle_unauthorized(unauthorized_transport, &mut auth_recovery).await?;
                     continue;
                 }
@@ -1032,6 +1077,13 @@ impl ModelClientSession {
             }
 
             let request = self.prepare_websocket_request(&model_info.slug, &api_prompt, &options);
+
+            tracing::debug!(
+                model = %model_info.slug,
+                input_items = api_prompt.input.len(),
+                has_oauth = self.client.state.provider.oauth.is_some(),
+                "WebSocket: sending Responses API request"
+            );
 
             let stream_result = self
                 .connection
@@ -1158,6 +1210,24 @@ impl ModelClientSession {
             self.websocket_last_items.clear();
         }
         activated
+    }
+}
+
+/// Strips encrypted content from input items.
+///
+/// OAuth/proxy providers rotate server-side encryption keys on every token
+/// refresh, so any `encrypted_content` captured under a previous token will
+/// be rejected with `invalid_encrypted_content`.  Stripping it before sending
+/// avoids that error — the model still sees reasoning summaries and other
+/// non-encrypted fields.
+fn strip_encrypted_content_from_input(items: &mut [ResponseItem]) {
+    for item in items.iter_mut() {
+        if let ResponseItem::Reasoning {
+            encrypted_content, ..
+        } = item
+        {
+            *encrypted_content = None;
+        }
     }
 }
 

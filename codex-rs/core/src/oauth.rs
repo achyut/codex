@@ -106,6 +106,10 @@ pub struct OAuthTokenManager {
     subscription_key: String,
     /// Static api-version value from config, used on every request.
     api_version: String,
+    /// HTTP client used for token refresh requests.
+    client: Client,
+    /// Full URL of the token refresh endpoint.
+    refresh_url: String,
     /// Handle to the background refresh task so we can abort it on drop.
     _refresh_handle: tokio::task::JoinHandle<()>,
 }
@@ -171,6 +175,8 @@ impl OAuthTokenManager {
             state,
             subscription_key,
             api_version,
+            client,
+            refresh_url,
             _refresh_handle: refresh_handle,
         })
     }
@@ -199,6 +205,44 @@ impl OAuthTokenManager {
     /// Returns the static `api-version` value.
     pub fn api_version(&self) -> &str {
         &self.api_version
+    }
+
+    /// Forces an immediate token refresh.
+    ///
+    /// Called reactively after receiving a 401 Unauthorized response so the
+    /// next retry uses a fresh token. The result is best-effort: even if this
+    /// call fails (e.g. the background loop already consumed the refresh
+    /// token), the caller should retry the API request because the background
+    /// loop may have already placed a valid token in shared state.
+    pub async fn force_refresh(&self) -> anyhow::Result<()> {
+        let (current_api_token, current_refresh_token) = {
+            let guard = self.state.read().await;
+            (guard.api_token.clone(), guard.refresh_token.clone())
+        };
+
+        info!("OAuth: forcing immediate token refresh after 401");
+
+        let new_state = refresh_once(
+            &self.client,
+            &self.refresh_url,
+            &self.subscription_key,
+            &self.api_version,
+            &current_api_token,
+            &current_refresh_token,
+        )
+        .await?;
+
+        info!(
+            "OAuth: force refresh succeeded (new TTL: {}s)",
+            new_state.expires_in
+        );
+
+        let mut guard = self.state.write().await;
+        guard.api_token = new_state.api_token;
+        guard.refresh_token = new_state.refresh_token;
+        guard.expires_in = new_state.expires_in;
+
+        Ok(())
     }
 }
 
